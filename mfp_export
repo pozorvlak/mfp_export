@@ -6,19 +6,40 @@ use WWW::Mechanize;
 use YAML qw/LoadFile/;
 use XML::XPath;
 
-my $mech = WWW::Mechanize->new();
-my $config = LoadFile("config.yml");
+sub login {
+    my ($username, $password) = @_;
+    my $mech = WWW::Mechanize->new();
+    $mech->get("http://www.myfitnesspal.com/account/login");
+    $mech->submit_form(
+        fields => {
+            username => $username,
+            password => $password,
+        }
+    );
+    return $mech;
+}
 
-$mech->get("http://www.myfitnesspal.com/account/login");
-$mech->submit_form(
-    fields => {
-        username => $config->{username},
-        password => $config->{password},
+sub get_data {
+    my ($mech, $url) = @_;
+    $mech->get($url);
+    my $xp = XML::XPath->new(xml => $mech->content);
+    my $dates = $xp->find('//chart_data/row[1]/string/text()');
+    my $data = $xp->find('//chart_data/row[2]/number/text()');
+    my @out;
+    for my $i (1..$data->size) {
+        push @out,
+            [$dates->get_node($i)->getValue(), $data->get_node($i)->getValue()];
     }
-);
-$mech->get("http://www.myfitnesspal.com/reports/results/nutrition/Net%20Calories/30");
-my $xp = XML::XPath->new(xml => $mech->content);
-my $nodeset = $xp->find('//chart_data/row/number/text()');
-for my $i (1..$nodeset->size) {
-    print $nodeset->get_node($i)->getValue()."\n";
+    return \@out;
+}
+
+my $config = LoadFile("config.yml");
+my $mech = login($config->{username}, $config->{password});
+my $consumed = get_data($mech,
+    "http://www.myfitnesspal.com/reports/results/nutrition/Calories/30");
+my $burned = get_data($mech,
+    "http://www.myfitnesspal.com/reports/results/fitness/Calories%20Burned/30");
+for my $i (0 .. scalar @$consumed - 1) {
+    my ($date, $eaten, $burned) = (@{$consumed->[$i]}, $burned->[$i][1]);
+    print "$date -> $eaten - $burned = ".($eaten - $burned)."\n";
 }
